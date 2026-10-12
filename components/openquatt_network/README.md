@@ -15,9 +15,9 @@ is based on the exact beta tag and preserves its PSRAM RX path, W5500 SPI driver
 and PHY changes. Pinning current ESPHome `dev` directly would mix unreviewed
 changes with the selected release.
 
-The Ethernet component sources are identical in 2026.10.0b1 and
-2026.10.0b2. The reviewed b1-based lifecycle backport is therefore retained
-unchanged with the b2 runtime; no moving upstream branch is introduced.
+The Ethernet component sources are identical in 2026.10.0b1,
+2026.10.0b2 and 2026.10.0b3. The reviewed b1-based lifecycle backport is therefore retained
+unchanged with the b3 runtime; no moving upstream branch is introduced.
 
 Remove the external pin only when the configured ESPHome release includes the
 lifecycle fix and `is_driver_stopped()`, after reviewing the existing component
