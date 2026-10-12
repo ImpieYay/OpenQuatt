@@ -38,6 +38,7 @@ class ModbusMetadataContinuityContractTest(unittest.TestCase):
         )
         for value in (
             "CompressorLevelProfile::UNKNOWN",
+            "validated_core_identity) =",
             "runtime_frequency_snapshot_storage) = {}",
             'generation).publish_state("Unknown")',
         ):
@@ -73,6 +74,19 @@ class ModbusMetadataContinuityContractTest(unittest.TestCase):
         self.assertIn("runtime_frequency_mapping_valid", INCIDENT_MANAGER_SOURCE)
         self.assertIn("outputs.must_stop = true", INCIDENT_MANAGER_SOURCE)
         self.assertIn("kRuntimeFrequencyMappingIncidentId", INCIDENT_MANAGER_SOURCE)
+
+    def test_identity_change_blocks_old_mapping_before_publishing_confirmed_core(self) -> None:
+        detection = yaml_block(HP_IO, "id: ${hp_id}_detect_odu_generation_once",
+                               "id: ${hp_id}_load_runtime_frequency_table_once")
+        self.assertIn("oq_odu::core_identity_changed(previous_core, core)", detection)
+        changed = detection.index("if (identity_changed)")
+        invalidate = detection.index("invalidate_runtime_frequency_reload();", changed)
+        block = detection.index("observe_runtime_frequency_mapping(", invalidate)
+        publish = detection.index("pcb_firmware_raw).publish_state", block)
+        cache = detection.index("validated_core_identity) = core", publish)
+        self.assertLess(invalidate, block)
+        self.assertLess(block, publish)
+        self.assertLess(publish, cache)
 
 
 if __name__ == "__main__":

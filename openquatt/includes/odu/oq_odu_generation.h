@@ -47,6 +47,14 @@ struct CoreIdentity {
   uint16_t control_board_item{0};
 };
 
+// The first complete identity initializes the cache; incomplete reads do not
+// change it. Compare only confirmed core data, never periodically polled sensors.
+inline bool core_identity_changed(const CoreIdentity& previous, const CoreIdentity& current) {
+  return previous.available && current.available &&
+         (previous.control_board_item != current.control_board_item || previous.pcb_program != current.pcb_program ||
+          previous.compressor_code != current.compressor_code);
+}
+
 struct CustomerModelPrefix {
   bool available{false};
   bool missing{false};

@@ -9,6 +9,7 @@
 namespace {
 
 using oq_odu::confirmed_variant;
+using oq_odu::core_identity_changed;
 using oq_odu::CoreIdentity;
 using oq_odu::customer_model_label;
 using oq_odu::CustomerModelPrefix;
@@ -153,6 +154,31 @@ void test_labels_and_request_tokens() {
   assert(next_request_token(std::numeric_limits<uint32_t>::max()) == 1U);
 }
 
+void test_confirmed_core_identity_changes() {
+  const CoreIdentity initial{true, oq_odu::COMPRESSOR_CODE_V2, 0x0201U, oq_odu::CONTROL_BOARD_ITEM_V2_NEW_MODEL};
+  assert(!core_identity_changed(CoreIdentity{}, initial));
+  assert(!core_identity_changed(initial, CoreIdentity{}));
+  assert(!core_identity_changed(initial, initial));
+
+  auto revised = initial;
+  ++revised.pcb_program;
+  assert(core_identity_changed(initial, revised));
+  assert(detect_generation(revised).variant == detect_generation(initial).variant);
+  revised = initial;
+  ++revised.compressor_code;
+  assert(core_identity_changed(initial, revised));
+  assert(detect_generation(revised).variant == detect_generation(initial).variant);
+  revised = initial;
+  revised.control_board_item = oq_odu::CONTROL_BOARD_ITEM_V1;
+  assert(core_identity_changed(initial, revised));
+
+  // A zero compressor code or PCB program is still a complete identity.
+  const CoreIdentity zero_values{true, 0U, 0U, oq_odu::CONTROL_BOARD_ITEM_V1};
+  auto zero_revised = zero_values;
+  ++zero_revised.pcb_program;
+  assert(core_identity_changed(zero_values, zero_revised));
+}
+
 }  // namespace
 
 int main() {
@@ -161,5 +187,6 @@ int main() {
   test_reference_fingerprints();
   test_ambiguous_or_conflicting_fingerprints_fail_closed();
   test_labels_and_request_tokens();
+  test_confirmed_core_identity_changes();
   return 0;
 }

@@ -37,7 +37,7 @@ esphome:
           id(${hp_id}_odu_generation_request_token) = 0U;
           id(${hp_id}_odu_generation_revalidation_required) = true;
           id(${hp_id}_runtime_frequency_revalidation_required) = true;
-          id(${hp_id}_validated_control_board_item) = 0U;
+          id(${hp_id}_validated_core_identity) = {};
           id(${hp_id}_generation).publish_state("Unknown");
           id(${hp_id}_generation_variant_code) =
               static_cast<int>(oq_odu::Variant::UNKNOWN);
@@ -314,10 +314,10 @@ globals:
     restore_value: no
     initial_value: 'true'
 
-  - id: ${hp_id}_validated_control_board_item
-    type: uint16_t
+  - id: ${hp_id}_validated_core_identity
+    type: oq_odu::CoreIdentity
     restore_value: no
-    initial_value: '0'
+    initial_value: 'oq_odu::CoreIdentity{}'
 
   - id: ${hp_id}_generation_variant_code
     type: int
@@ -415,15 +415,18 @@ script:
                   // active until its separate complete reload succeeds.
                   const auto previous_variant = static_cast<oq_odu::Variant>(
                       id(${hp_id}_generation_variant_code));
+                  const auto previous_core = id(${hp_id}_validated_core_identity);
                   const bool identity_changed =
-                      id(${hp_id}_validated_control_board_item) != 0U &&
-                      (id(${hp_id}_validated_control_board_item) != core.control_board_item ||
+                      previous_core.available &&
+                      (oq_odu::core_identity_changed(previous_core, core) ||
                        previous_variant != detection.variant);
                   if (identity_changed) {
                     invalidate_runtime_frequency_reload();
                     id(oq_incident_manager).observe_runtime_frequency_mapping(
                         ${hp_index}, false, millis());
-                    ESP_LOGW("quatt.odu", "%sODU identity changed; incident manager requires mapping revalidation", "${prefix}");
+                    ESP_LOGW("quatt.odu", "%sODU identity changed (PCB program %u -> %u, compressor %u -> %u); incident manager requires mapping revalidation",
+                             "${prefix}", previous_core.pcb_program, core.pcb_program,
+                             previous_core.compressor_code, core.compressor_code);
                   }
                   id(${hp_id}_pcb_firmware_raw).publish_state(core.pcb_program);
                   id(${hp_id}_control_board_item).publish_state(core.control_board_item);
@@ -434,7 +437,7 @@ script:
                   id(${hp_id}_odu_defrost)->set_odu_identity(detection.variant, core.control_board_item);
                   id(${hp_id}_generation_variant_code) =
                       static_cast<int>(detection.variant);
-                  id(${hp_id}_validated_control_board_item) = core.control_board_item;
+                  id(${hp_id}_validated_core_identity) = core;
                   id(${hp_id}_generation_variant).publish_state(
                       oq_odu::variant_label(detection.variant));
                   id(${hp_id}_generation).publish_state(
