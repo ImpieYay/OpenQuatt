@@ -19,6 +19,9 @@ bool write_status_json(const Snapshot& s, unsigned hp, unsigned variant, bool pe
     return emit(std::isfinite(value) ? snprintf(out, sizeof(out), "%.2f", static_cast<double>(value))
                                      : snprintf(out, sizeof(out), "null"));
   };
+  const auto raw_threshold = [&](int value) {
+    return s.loaded && value >= 0 && value <= 255 ? emit(snprintf(out, sizeof(out), "%d", value)) : literal("null");
+  };
   if (!emit(snprintf(
           out, sizeof(out),
           R"({"hp":%u,"online":%s,"fresh":%s,"identity_ready":%s,"variant":%u,"loaded":%s,"auto_defrost_control_ok":%s)",
@@ -46,6 +49,10 @@ bool write_status_json(const Snapshot& s, unsigned hp, unsigned variant, bool pe
           R"(,"interval_s":%d,"max_duration_s":%d,"exit_confirmation_s":%d,"exit_required_s":%d,"inferred_end_reason":"%s")",
           s.diagnostics.interval_s, s.diagnostics.max_duration_s, s.diagnostics.exit_confirm_s,
           s.diagnostics.exit_required_s, s.diagnostics.end_reason)) ||
+      !literal(",\"exit_limit_raw\":") || !raw_threshold(s.diagnostics.exit_limit_raw) ||
+      !literal(",\"extended_exit_limit_a_raw\":") || !raw_threshold(s.diagnostics.extended_exit_limit_a_raw) ||
+      !literal(",\"extended_exit_limit_b_raw\":") || !raw_threshold(s.diagnostics.extended_exit_limit_b_raw) ||
+      !literal(",\"exit_counter_time_unit\":\"unknown\"") ||
       !emit(snprintf(out, sizeof(out),
                      R"(,"profile_available":%s,"auto_reapply":%s,"desired_mode":%d,"profile_state":"%s")",
                      boolean(s.profile_available), boolean(s.auto_reapply), s.desired_mode, s.profile_state)) ||

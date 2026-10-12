@@ -246,13 +246,21 @@ void check_mode4_profile(const Reference& reference, const oq_defrost::Parameter
 void check_defrost(const Reference& reference, oq_odu::Variant variant) {
   oq_defrost::Parameters parameters;
   parameters.variant = variant;
-  parameters.base = eeprom_block<11>(reference.eeprom, 3270U);   // P271..P281
-  parameters.timing = eeprom_block<9>(reference.eeprom, 3307U);  // P308..P316
-  parameters.coil = eeprom_block<6>(reference.eeprom, 3336U);    // P337..P342
-  parameters.delta = eeprom_block<14>(reference.eeprom, 3414U);  // P415..P428
+  parameters.base = eeprom_block<11>(reference.eeprom, 3270U);
+  parameters.timing = eeprom_block<9>(reference.eeprom, 3307U);
+  parameters.coil = eeprom_block<6>(reference.eeprom, 3336U);
+  parameters.delta = eeprom_block<14>(reference.eeprom, 3414U);
   parameters.loaded = true;
   assert(parameters.automatic() && parameters.mode() == reference.defrost_mode);
   assert(oq_defrost::is_supported_defrost_mode(parameters.mode(), variant));
+  oq_defrost::Diagnostics raw_diagnostics;
+  raw_diagnostics.sample(parameters, false, false, NAN, NAN, NAN, NAN, 0);
+  assert(raw_diagnostics.exit_limit_raw == reference.eeprom[340]);
+  assert(raw_diagnostics.extended_exit_limit_a_raw ==
+         (oq_defrost::has_mode4_defrost(variant) ? reference.eeprom[427] : -1));
+  assert(raw_diagnostics.extended_exit_limit_b_raw ==
+         (oq_defrost::has_mode4_defrost(variant) ? reference.eeprom[428] : -1));
+  assert(raw_diagnostics.exit_required_s == -1);
   if (parameters.mode() == 0) {
     constexpr std::array<float, 5> ambient = {3, -3, -3.001f, -10, -10.001f};
     constexpr std::array<float, 5> start_c = {-3, -3, -5, -5, -12};

@@ -7,18 +7,19 @@
 #include "../control/oq_defrost_logic.h"
 
 namespace oq_defrost {
-// Pxxx -> PDU xxx + 2999. Parameters come from the connected ODU, not defaults.
+// Parameters come from the connected ODU, not defaults.
 struct Parameters {
-  std::array<uint16_t, 11> base{};   // P271..P281
-  std::array<uint16_t, 9> timing{};  // P308..P316
-  std::array<uint16_t, 6> coil{};    // P337..P342
-  std::array<uint16_t, 14> delta{};  // P415..P428; V1.5/V2 mode-4 extension, not V1
+  std::array<uint16_t, 11> base{};
+  std::array<uint16_t, 9> timing{};
+  std::array<uint16_t, 6> coil{};
+  std::array<uint16_t, 14> delta{};  // V1.5/V2 mode-4 extension, not V1
   oq_odu::Variant variant{oq_odu::Variant::UNKNOWN};
   bool loaded{false};
   int mode() const { return base[5]; }
   bool automatic() const { return loaded && base[4] == 1; }
 };
 inline float temperature(uint16_t raw) { return raw <= 255 ? static_cast<float>(raw) - 30.0f : NAN; }
+inline int raw_counter_threshold(uint16_t raw) { return raw <= 255U ? static_cast<int>(raw) : -1; }
 inline float start_threshold(const Parameters& p, float ambient) {
   if (!p.automatic() || !std::isfinite(ambient)) return NAN;
   if (p.mode() == 1) return temperature(p.base[6]);
@@ -57,6 +58,7 @@ struct Diagnostics {
   int confirm_s{-1}, confirm_required_s{-1}, runtime_s{-1};
   int interval_s{-1}, minimum_runtime_s{-1}, max_duration_s{-1};
   int exit_confirm_s{-1}, exit_required_s{-1};
+  int exit_limit_raw{-1}, extended_exit_limit_a_raw{-1}, extended_exit_limit_b_raw{-1};
   const char* end_reason{"UNKNOWN"};
   Confirmation start_timer{}, exit_timer{}, compressor_timer{};
   uint32_t last_ms{0};
@@ -64,6 +66,12 @@ struct Diagnostics {
 
   void sample(const Parameters& p, bool fresh, bool active, float ambient, float coil_c, float evap, float hz,
               uint32_t now) {
+    // Settings remain readable without fresh telemetry or an active method.
+    // They are byte-valued counter thresholds, not measured counters or seconds.
+    const bool raw_available = p.loaded && (p.variant == oq_odu::Variant::V1 || has_mode4_defrost(p.variant));
+    exit_limit_raw = raw_available ? raw_counter_threshold(p.coil[3]) : -1;
+    extended_exit_limit_a_raw = raw_available && has_mode4_defrost(p.variant) ? raw_counter_threshold(p.delta[12]) : -1;
+    extended_exit_limit_b_raw = raw_available && has_mode4_defrost(p.variant) ? raw_counter_threshold(p.delta[13]) : -1;
     const bool gap = !fresh || now - last_ms > 30000U;
     last_ms = now;
     if (gap) {
@@ -93,8 +101,8 @@ struct Diagnostics {
     confirm_s = confirm_required_s < 0 || !fresh
                     ? -1
                     : static_cast<int>(start_timer.sample(!active && hz > 0 && criterion, now));
-    // The mode-0 interval is internal, and P342 can override it in an incompletely
-    // known ambient band. Do not fabricate a countdown by replaying a partial model.
+    // The mode-0 interval is internal, with incompletely known ambient-dependent
+    // overrides. Do not fabricate a countdown by replaying a partial model.
     interval_s = p.automatic() && p.mode() == 4 ? static_cast<int>(p.base[0]) * 60 : -1;
     minimum_runtime_s = !p.automatic()  ? -1
                         : p.mode() == 4 ? static_cast<int>(p.timing[0]) * 60
@@ -105,8 +113,8 @@ struct Diagnostics {
     exit_c =
         p.loaded && (p.mode() != 4 || std::isfinite(ambient)) ? temperature(cold_path ? p.delta[8] : p.base[7]) : NAN;
     alternate_exit_c = p.loaded ? temperature(p.coil[4]) : NAN;
-    // P340/P427/P428 are task ticks in the register book. Their physical time
-    // unit is not proven; do not publish them as seconds or infer an exit from them.
+    // The physical time unit of the raw counter limits is not proven;
+    // do not publish them as seconds or infer an exit from them.
     exit_required_s = -1;
     exit_confirm_s =
         !fresh || !std::isfinite(exit_c) ? -1 : static_cast<int>(exit_timer.sample(active && coil_c >= exit_c, now));

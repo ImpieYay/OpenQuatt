@@ -39,6 +39,8 @@ OpenQuatt leest de actuele instellingen op aanvraag uit. Aanvullende instellinge
 
 Lokale looptijden beginnen bij waarneming en kunnen na een herstart korter zijn dan de werkelijke ODU-looptijd. De tijdschalen van de interne duurbegrenzingen zijn niet volledig bekend: de benodigde eindbevestiging blijft daarom onbekend. Een mogelijke maximale-duur-eindreden blijft een afleiding, nooit een bewezen oorzaak.
 
+De technische status-API geeft na het laden ook `exit_limit_raw`, `extended_exit_limit_a_raw` en `extended_exit_limit_b_raw`: ruwe tellerdrempels voor eindvoorwaarden. De twee aanvullende velden zijn alleen beschikbaar voor varianten met de mode-4-uitbreiding, ook als een andere methode is gekozen. Deze instellingen zijn geen actuele tellerstanden of aftelling. `exit_counter_time_unit` blijft `unknown`; de waarden worden niet omgerekend naar seconden. Niet geladen of ongeldige waarden, en niet ondersteunde uitbreidingvelden, zijn `null`. Zie het [API-contract](development/defrost-raw-diagnostics.md).
+
 ## V1 tegenover V1.5
 
 Handmatig ontdooien en defrostmethode 4 zijn twee verschillende zaken. De handmatige actie vraagt één extra cyclus aan; die blijft ook voor V1 beschikbaar wanneer alle normale veiligheidsvoorwaarden kloppen. De methodekeuze bepaalt daarentegen hoe de buitenunit normale ontdooicycli kwalificeert. De beschikbare methoden verschillen per buitenunitvariant.

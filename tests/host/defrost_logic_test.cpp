@@ -190,4 +190,40 @@ int main() {
   v1_mode4.sample(p, true, false, 1, -5, -12, 35, 23000);
   assert(std::isnan(v1_mode4.delta_k));
   assert(v1_mode4.confirm_required_s == -1);
+
+  // Raw settings do not imply an active exit path or a known time unit.
+  for (const auto variant : {oq_odu::Variant::V1, oq_odu::Variant::V1_5, oq_odu::Variant::V2_OLD_MODEL,
+                             oq_odu::Variant::V2_NEW_MODEL, oq_odu::Variant::UNKNOWN}) {
+    Parameters raw;
+    raw.variant = variant;
+    raw.coil[3] = 10;
+    raw.delta[12] = 3;
+    raw.delta[13] = 4;
+    Diagnostics thresholds;
+    thresholds.sample(raw, true, false, 1, -5, -12, 35, 1000);
+    assert(thresholds.exit_limit_raw == -1 && thresholds.extended_exit_limit_a_raw == -1 &&
+           thresholds.extended_exit_limit_b_raw == -1);
+    raw.loaded = true;
+    // Auto control is off, mode is 0 and live measurements are unavailable.
+    thresholds.sample(raw, false, false, NAN, NAN, NAN, NAN, 2000);
+    assert(thresholds.exit_limit_raw == (variant == oq_odu::Variant::UNKNOWN ? -1 : 10));
+    assert(thresholds.extended_exit_limit_a_raw == (has_mode4_defrost(variant) ? 3 : -1));
+    assert(thresholds.extended_exit_limit_b_raw == (has_mode4_defrost(variant) ? 4 : -1));
+    assert(thresholds.exit_required_s == -1 && thresholds.interval_s == -1);
+    raw.loaded = false;
+    thresholds.sample(raw, false, false, NAN, NAN, NAN, NAN, 3000);
+    assert(thresholds.exit_limit_raw == -1 && thresholds.extended_exit_limit_a_raw == -1 &&
+           thresholds.extended_exit_limit_b_raw == -1);
+  }
+  p.variant = oq_odu::Variant::V2_NEW_MODEL;
+  p.coil[3] = 0;
+  p.delta[12] = 255;
+  p.delta[13] = 256;
+  d.sample(p, false, false, NAN, NAN, NAN, NAN, 24000);
+  assert(d.exit_limit_raw == 0 && d.extended_exit_limit_a_raw == 255 && d.extended_exit_limit_b_raw == -1);
+  p.coil[3] = 65535;
+  p.delta[12] = 256;
+  p.delta[13] = 0;
+  d.sample(p, false, false, NAN, NAN, NAN, NAN, 25000);
+  assert(d.exit_limit_raw == -1 && d.extended_exit_limit_a_raw == -1 && d.extended_exit_limit_b_raw == 0);
 }

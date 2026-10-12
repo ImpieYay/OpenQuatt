@@ -31,8 +31,49 @@ int main() {
   };
   assert(oq_defrost::write_status_json(s, 1, 2, false, "abcd", send));
   const std::string expected =
-      R"({"hp":1,"online":false,"fresh":false,"identity_ready":false,"variant":2,"loaded":false,"auto_defrost_control_ok":false,"busy":false,"active":false,"manual":false,"can_trigger":false,"defrost_mode":-1,"operation_mode":-1,"state":"IDLE","guard":"OFFLINE","elapsed_s":-1,"since_last_s":-1,"last_duration_s":-1,"confidence":"limited","end_reason":"unknown","ambient_c":null,"coil_c":null,"evaporation_c":null,"compressor_hz":null,"delta_k":null,"start_threshold_c":null,"delta_required_k":null,"exit_threshold_c":null,"alternate_exit_c":null,"confirmation_s":-1,"confirmation_required_s":-1,"runtime_s":-1,"minimum_runtime_s":-1,"interval_s":-1,"max_duration_s":-1,"exit_confirmation_s":-1,"exit_required_s":-1,"inferred_end_reason":"UNKNOWN","profile_available":false,"auto_reapply":false,"desired_mode":-1,"profile_state":"NONE","csrf_token":"abcd"})";
+      R"({"hp":1,"online":false,"fresh":false,"identity_ready":false,"variant":2,"loaded":false,"auto_defrost_control_ok":false,"busy":false,"active":false,"manual":false,"can_trigger":false,"defrost_mode":-1,"operation_mode":-1,"state":"IDLE","guard":"OFFLINE","elapsed_s":-1,"since_last_s":-1,"last_duration_s":-1,"confidence":"limited","end_reason":"unknown","ambient_c":null,"coil_c":null,"evaporation_c":null,"compressor_hz":null,"delta_k":null,"start_threshold_c":null,"delta_required_k":null,"exit_threshold_c":null,"alternate_exit_c":null,"confirmation_s":-1,"confirmation_required_s":-1,"runtime_s":-1,"minimum_runtime_s":-1,"interval_s":-1,"max_duration_s":-1,"exit_confirmation_s":-1,"exit_required_s":-1,"inferred_end_reason":"UNKNOWN","exit_limit_raw":null,"extended_exit_limit_a_raw":null,"extended_exit_limit_b_raw":null,"exit_counter_time_unit":"unknown","profile_available":false,"auto_reapply":false,"desired_mode":-1,"profile_state":"NONE","csrf_token":"abcd"})";
   assert(output == expected && max_chunk < 192);
+
+  oq_defrost::Parameters p;
+  p.loaded = true;
+  p.variant = oq_odu::Variant::V1_5;
+  p.coil[3] = 10;
+  p.delta[12] = 3;
+  p.delta[13] = 4;
+  s.loaded = true;
+  s.diagnostics.sample(p, false, false, NAN, NAN, NAN, NAN, 1000);
+  output.clear();
+  assert(oq_defrost::write_status_json(s, 1, 2, false, "abcd", send));
+  assert(output.find("\"exit_limit_raw\":10,\"extended_exit_limit_a_raw\":3,\"extended_exit_limit_b_raw\":4") !=
+         std::string::npos);
+  assert(output.find("\"exit_counter_time_unit\":\"unknown\"") != std::string::npos);
+  assert(output.find("\"exit_required_s\":-1") != std::string::npos);
+  assert(output.find("\"interval_s\":-1") != std::string::npos);
+
+  // Offline clears loaded before the main-loop snapshot is refreshed. Never
+  // expose the previous raw settings from that retained diagnostic snapshot.
+  s.loaded = false;
+  output.clear();
+  assert(oq_defrost::write_status_json(s, 1, 2, false, "abcd", send));
+  assert(output.find("\"exit_limit_raw\":null,\"extended_exit_limit_a_raw\":null,\"extended_exit_limit_b_raw\":null") !=
+         std::string::npos);
+  s.loaded = true;
+  p.variant = oq_odu::Variant::V1;
+  s.diagnostics.sample(p, false, false, NAN, NAN, NAN, NAN, 2000);
+  output.clear();
+  assert(oq_defrost::write_status_json(s, 1, 1, false, "abcd", send));
+  assert(output.find("\"exit_limit_raw\":10,\"extended_exit_limit_a_raw\":null,\"extended_exit_limit_b_raw\":null") !=
+         std::string::npos);
+
+  // Zero is a value; invalid high bytes and sentinel values are JSON null.
+  s.diagnostics.exit_limit_raw = 0;
+  s.diagnostics.extended_exit_limit_a_raw = 256;
+  s.diagnostics.extended_exit_limit_b_raw = 255;
+  output.clear();
+  assert(oq_defrost::write_status_json(s, 1, 2, false, "abcd", send));
+  assert(output.find("\"exit_limit_raw\":0,\"extended_exit_limit_a_raw\":null,\"extended_exit_limit_b_raw\":255") !=
+         std::string::npos);
+  assert(max_chunk < 192);
 
   s.online = s.fresh = s.identity = s.loaded = s.automatic = s.can_trigger = true;
   s.mode = s.operation_mode = s.elapsed_s = s.since_s = s.duration_s = INT_MIN;
