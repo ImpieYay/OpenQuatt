@@ -1,7 +1,7 @@
 (function () {
   const OPENQUATT_RESUME_CLEAR_VALUE = "2000-01-01 00:00:00";
   const OPENQUATT_AUTH_RECOVERY_WINDOW_MS = 600000;
-  const DEBUG_RECORDING_BUFFER_BYTES = 1024 * 1024;
+  const DEBUG_RECORDING_BUFFER_BYTES = 2 * 1024 * 1024;
   const DEBUG_RECORDING_SYSTEM_FIELD_COUNT = 5;
   const DEBUG_RECORDING_FIELD_CAPACITY = 256;
   const DEBUG_RECORDING_SAMPLE_HEADER_BYTES = 8;
@@ -189,10 +189,9 @@
     debugRecording: {
       enabled: true,
       active: false,
-      mode: "manual",
+      mode: "rolling",
       startedAt: 0,
       stoppedAt: 0,
-      durationS: 15 * 60,
       nextOffsetS: 0,
       fields: [],
       samples: [],
@@ -2019,6 +2018,7 @@
     setEntity("binary_sensor", "Usage statistics choice configured", { value: false, state: false });
     setEntity("switch", "Performance model validation", { value: false, state: false });
     setEntity("binary_sensor", "Performance model validation choice configured", { value: false, state: false });
+    setEntity("binary_sensor", "Performance model validation prompt handled", { value: false, state: false });
     setEntity("text_sensor", "Usage statistics installation ID", { value: "7df1c1f8-fc47-4ac8-b0d7-94d8c42d772f", state: "7df1c1f8-fc47-4ac8-b0d7-94d8c42d772f" });
     setEntity("text", "CIC - Feed URL", { value: "http://192.168.2.117:8080/beta/feed/data.json", state: "http://192.168.2.117:8080/beta/feed/data.json" });
     setEntity("switch", "OpenTherm Enabled", { value: false, state: false });
@@ -4164,6 +4164,7 @@
       return;
     }
     if (name === "Performance model validation") {
+      setEntity("binary_sensor", "Performance model validation prompt handled", { value: true, state: true });
       setEntity("binary_sensor", "Performance model validation choice configured", { value: true, state: true });
     }
     if (name === "Boiler assist enabled" && !enabled) {
@@ -5274,8 +5275,7 @@
     if (!recording.startedAt) {
       return;
     }
-    const rolling = recording.mode === "rolling";
-    const elapsedS = rolling ? getDebugRecordingElapsedS(recording) : Math.min(getDebugRecordingElapsedS(recording), Number(recording.durationS || 0));
+    const elapsedS = getDebugRecordingElapsedS(recording);
     if (!Number.isFinite(Number(recording.nextOffsetS))) {
       recording.nextOffsetS = 0;
     }
@@ -5296,19 +5296,13 @@
         if (recording.samples[0]) recording.samples[0].event_count = 0;
       }
     }
-    if (!rolling && recording.active && elapsedS >= Number(recording.durationS || 0)) {
-      recording.active = false;
-      recording.stoppedAt = recording.startedAt + Number(recording.durationS || 0) * 1000;
-    }
   }
 
   function getDebugRecordingStatusPayload() {
     ensureMockRecorderAutostart();
     syncDebugRecordingSamples();
     const recording = state.debugRecording;
-    const rolling = recording.mode === "rolling";
-    const elapsedS = rolling ? getDebugRecordingElapsedS(recording) : Math.min(getDebugRecordingElapsedS(recording), Number(recording.durationS || 0));
-    const remainingS = recording.active && !rolling ? Math.max(0, Number(recording.durationS || 0) - elapsedS) : 0;
+    const elapsedS = getDebugRecordingElapsedS(recording);
     const firstSample = recording.samples[0] || null;
     const lastSample = recording.samples[recording.samples.length - 1] || null;
     const retainedDurationS = firstSample && lastSample ? Math.max(0, lastSample.offset_s - firstSample.offset_s) : 0;
@@ -5320,14 +5314,12 @@
       available: true,
       enabled: recording.enabled !== false,
       active: Boolean(recording.active),
-      mode: rolling ? "rolling" : "manual",
-      rolling,
+      mode: "rolling",
+      rolling: true,
       recording_id: Number(recording.startedAt || 0),
       storage: "psram",
       interval_s: 10,
-      duration_s: Number(recording.durationS || 0),
       elapsed_s: elapsedS,
-      remaining_s: remainingS,
       retained_duration_s: retainedDurationS,
       retention_capacity_s: Math.max(0, sampleCapacity - 1) * 10,
       sample_count: recording.samples.length,
@@ -5347,7 +5339,7 @@
       string_overflow: false,
       event_count: eventCount,
       buffer_size: DEBUG_RECORDING_BUFFER_BYTES,
-      storage_size: DEBUG_RECORDING_BUFFER_BYTES + (2 * DEBUG_RECORDING_FIELD_CAPACITY * 120) + (64 * 1024),
+      storage_size: DEBUG_RECORDING_BUFFER_BYTES + (2 * DEBUG_RECORDING_FIELD_CAPACITY * 120) + (4096 * 16) + (1024 * 2) + (4096 * 2) + (256 * 1024),
       estimated_size: 2048 + recording.samples.length * (16 + recording.fields.length * 3),
       buffer: "psram",
       csrf_token: DEBUG_RECORDING_CSRF_TOKEN,
@@ -5395,6 +5387,9 @@
   }
 
   function handleDebugRecordingStart(url) {
+    if (url.searchParams.get("rolling") !== "1") {
+      return mockResponse(410, { ok: false, error: "timed_recording_removed" });
+    }
     const pending = state.debugRecording;
     if (pending.enabled === false) {
       return mockResponse(409, { ok: false, error: "recorder_disabled" });
@@ -5402,15 +5397,12 @@
     if (!pending.configurationPending || pending.pendingFields.length <= DEBUG_RECORDING_SYSTEM_FIELD_COUNT) {
       return mockResponse(409, { ok: false, error: "configuration_not_ready" });
     }
-    const rolling = url.searchParams.get("rolling") === "1";
-    const durationS = rolling ? 0 : Math.max(60, Math.min(3600, Number(url.searchParams.get("duration_s") || 15 * 60)));
     state.debugRecording = {
       enabled: pending.enabled !== false,
       active: true,
-      mode: rolling ? "rolling" : "manual",
+      mode: "rolling",
       startedAt: Date.now(),
       stoppedAt: 0,
-      durationS,
       nextOffsetS: 0,
       fields: [...pending.pendingFields],
       samples: [],
@@ -5462,7 +5454,6 @@
       mode: "rolling",
       startedAt: state.bootedAt,
       stoppedAt: 0,
-      durationS: 0,
       nextOffsetS: 0,
       fields,
       samples: [],
@@ -5487,7 +5478,6 @@
       mode: "rolling",
       startedAt: Date.now(),
       stoppedAt: 0,
-      durationS: 0,
       nextOffsetS: 0,
       samples: [],
       missingFieldCount: Number(recording.missingFieldCount || 0),
@@ -5525,7 +5515,6 @@
       mode: "rolling",
       startedAt: Date.now(),
       stoppedAt: 0,
-      durationS: 0,
       nextOffsetS: 0,
       samples: [],
     };
@@ -5563,7 +5552,7 @@
       });
       return [sample.offset_s - firstOffset, deltas];
     });
-    const windowEventCount = windowSamples.reduce((total, sample) => total + Number(sample.event_count || 0), 0);
+    const windowEventCount = windowSamples.slice(1).reduce((total, sample) => total + Number(sample.event_count || 0), 0);
     return {
       format: "openquatt-debug-device-v1",
       schema_version: 1,

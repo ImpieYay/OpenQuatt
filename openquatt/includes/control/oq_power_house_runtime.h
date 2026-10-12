@@ -57,8 +57,10 @@ class Runtime {
   }
 
   void tick(const TickConfig& config) {
+    const uint32_t now_ms = static_cast<uint32_t>(millis());
     const bool active = id(oq_strategy_active_code) == 3 && id(oq_control_mode_code) != 5 && id(oq_heat_mode_code) != 1;
     if (!active) {
+      this->startup_phase_ = oq_power_house::update_startup_phase(this->startup_phase_, now_ms, false);
       this->reset();
       return;
     }
@@ -67,7 +69,6 @@ class Runtime {
         id(room_setpoint_selected).state, id(oq_warmup_trigger_c).state, id(oq_warmup_enabled).state);
     const float effective_target_c = warmup.effective_c;
     const bool warming = warmup.limited;
-    const uint32_t now_ms = static_cast<uint32_t>(millis());
     if (id(oq_strategy_output_source_code) != 3) this->dispatch_state_ = {};
     const bool hp1_valve_defrost = id(hp1_4_way_valve).state;
     const bool hp1_oil_return = id(hp1_prot_oil_return).state;
@@ -85,8 +86,7 @@ class Runtime {
                                 id(hp1_last_applied_level), hp2_applied_level});
 
     const auto cadence = oq_power_house::decide_cadence(now_ms, id(oq_ph_request_last_loop_ms), config.loop_ms);
-    if (!cadence.due) return;
-    id(oq_ph_request_last_loop_ms) = now_ms == 0 ? UINT32_MAX : now_ms;
+    if (config.loop_ms == 0 || (!cadence.due && this->startup_phase_ == oq_power_house::StartupPhase::READY)) return;
 
     const oq_power_house::DemandInput demand_input{
         now_ms,
@@ -121,7 +121,19 @@ class Runtime {
     // Temporary targets must not build comfort memory for the final target.
     if (warming || this->was_warming_) this->demand_state_.comfort_memory_c = 0.0f;
     this->was_warming_ = warming;
-    auto demand = oq_power_house::decide_demand(demand_input, demand_tuning, this->demand_state_);
+    const auto previous_startup_phase = this->startup_phase_;
+    auto demand =
+        oq_power_house::decide_startup_demand(demand_input, demand_tuning, this->demand_state_, this->startup_phase_);
+    if (this->startup_phase_ != previous_startup_phase) {
+      ESP_LOGI("quatt.strategy", "Power House startup inputs %s after %us",
+               this->startup_phase_ == oq_power_house::StartupPhase::READY ? "ready" : "timed out",
+               static_cast<unsigned>(now_ms / 1000U));
+    }
+    if (this->startup_phase_ != oq_power_house::StartupPhase::READY) {
+      this->publish_startup_wait_(now_ms, demand.requested_w);
+      return;
+    }
+    id(oq_ph_request_last_loop_ms) = now_ms == 0 ? UINT32_MAX : now_ms;
     if (warming) demand.next.comfort_memory_c = 0.0f;
     this->demand_state_ = demand.next;
     float requested_w = demand.requested_w;
@@ -245,9 +257,10 @@ class Runtime {
 #if OQ_TOPOLOGY_DUO
     include_minimum(dispatch_input.hp2);
 #endif
-    // Ordinary room recovery follows a room-demand start and releases halfway
-    // through the restart band. Controlled warmup also retains an existing run
-    // through intermediate steps, until real comfort or session cancellation.
+    // Ordinary room recovery retains a room-demand start until the full setpoint.
+    // Controlled warmup also retains an existing run through intermediate steps,
+    // until real comfort or session cancellation. Releasing this floor lets normal
+    // demand take over; it does not force a stop at the setpoint.
     if ((intent.fast_start || intent.room_recovery_active) && std::isfinite(minimum_viable_w) &&
         id(oq_water_temp_limit_factor) >= 0.999f) {
       requested_w = std::max(requested_w, minimum_viable_w);
@@ -460,6 +473,29 @@ class Runtime {
   float run_extension_warm_restart_c() const { return this->run_ext_warm_restart_c_; }
 
  private:
+  void publish_startup_wait_(uint32_t now_ms, float requested_w) {
+    // No stale strategy request or boiler-assist output may survive acquisition.
+    // The independent actuator/incident safety gates keep owning compressor stops.
+    id(oq_ph_request_hp1_level) = id(oq_ph_request_hp2_level) = id(oq_ph_request_owner_hp) = 0;
+    id(oq_ph_request_reason_code) = 0;
+    id(oq_ph_fast_intent_code) = 0;
+    id(oq_phouse_req_w) = requested_w;
+    id(oq_demand_raw) = id(oq_demand_filtered) = id(oq_heating_demand_filtered) = 0;
+    id(oq_demand_filtered_prev) = 0;
+    id(oq_P_hp_cap_w) = id(oq_P_deficit_w) = NAN;
+    id(oq_strategy_phase_code) = 0;
+    id(oq_strategy_requested_power_w) = requested_w;
+    id(oq_strategy_supply_target_temp) = NAN;
+    id(oq_strategy_heat_request_active) = false;
+    id(oq_strategy_hp_expected_power_w) = id(oq_strategy_hp_max_power_w) = NAN;
+    id(oq_strategy_hp_saturated) = id(oq_strategy_output_valid) = false;
+    id(oq_strategy_output_source_code) = 3;
+    id(oq_strategy_output_updated_ms) = now_ms;
+    id(oq_strategy_phase_text)
+        .publish_state(this->startup_phase_ == oq_power_house::StartupPhase::WAITING_INPUTS ? "waiting_inputs"
+                                                                                            : "input_timeout");
+  }
+
   static bool near_(float value, float expected) { return std::isfinite(value) && std::fabs(value - expected) < 0.25f; }
 
   template <typename T>
@@ -477,6 +513,8 @@ class Runtime {
   std::string last_optimizer_reason_;
   oq_power_house_run_extension::State run_extension_state_;
   oq_power_house_run_extension::Phase last_run_ext_phase_{oq_power_house_run_extension::Phase::INACTIVE};
+  // One-shot boot deadline: strategy resets must not re-arm the grace period.
+  oq_power_house::StartupPhase startup_phase_{oq_power_house::StartupPhase::WAITING_INPUTS};
   bool run_ext_enabled_{false};
   bool run_ext_blocked_{false};
   float run_ext_base_w_{0.0f};

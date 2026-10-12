@@ -9,6 +9,9 @@
 
 #include "esp_heap_caps.h"
 #include "esp_partition.h"
+#include "esp_attr.h"
+#include "esp_system.h"
+#include "esp_private/startup_internal.h"
 #include "esphome/components/ota/ota_backend.h"
 #include "OpenQuattFlashLayout.h"
 #include "PsramBuffer.h"
@@ -24,6 +27,23 @@ namespace oq_ph_learning {
 
 using namespace oq_power_house::learning;
 using esphome::openquatt_common::OpenQuattFlashLayout;
+
+#if !defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_ESP32S3_RTCDATA_IN_FAST_MEM) || \
+    defined(CONFIG_ULP_COPROC_ENABLED)
+#error "Daily restart tickets require the ESP32-S3 default RTC slow-memory layout"
+#endif
+// The whole-region alignment pins this small object to RTC slow-memory base.
+// A conflicting layout fails to link instead of silently moving the ticket
+// between OTA images and allowing an A->B->A update to revive an old grant.
+static RTC_NOINIT_ATTR __attribute__((aligned(8192))) volatile DailyRestartTicket daily_restart_ticket;
+static DailyRestartTicket boot_restart_ticket;
+
+ESP_SYSTEM_INIT_FN(oq_daily_restart_ticket, CORE, BIT(0), 0) {
+  // Consume before constructors, including boots that never start the learner.
+  // The classified reset reason becomes available after global constructors.
+  boot_restart_ticket = daily_restart_ticket.consume(true);
+  return ESP_OK;
+}
 
 static_assert(OpenQuattFlashLayout::HOUSE_LEARNING_SLOT_COUNT == 2U,
               "The journal selector and caller-owned slot buffers require exactly two slots");
@@ -56,15 +76,15 @@ struct RuntimeStorage {
   PassiveRuntimeSummary summary;
   PassiveRuntimeConfig config;
   oq_sources::ResolvedLearningSource sources[4];
-  uint32_t source_revisions[4]{};
-  uint32_t valid_source_revisions[4]{};
   uint8_t context[kMaxPassiveContextBytes]{};
   size_t context_size = 0;
   LearningJournalStore journal;
+  DailyRestartTicket boot_restart_ticket{};
   // Slot bytes stay immutable while the first valid post-boot sample is awaited.
   LearningJournalRecords pending_daily;
   bool daily_restore_pending = false;
   bool restart_prepared = false;
+  bool restart_checkpoint_verified = false;
   OtaCollectionPause ota_pause;
   bool daily_restore_allowed = true;
   const char* daily_resume_status = "none";
@@ -85,8 +105,11 @@ struct RuntimeStorage {
 class Runtime : public esphome::ota::OTAGlobalStateListener {
  public:
   void pause(LearningStatus rejection = LearningStatus::SEGMENT_INELIGIBLE) {
+    daily_restart_ticket.clear();
+    boot_restart_ticket = {};
     if (!storage_) return;
     auto& state = storage_[0];
+    state.boot_restart_ticket = {};
     state.daily_restore_pending = false;
     if (state.daily_restore_allowed)
       state.daily_resume_reason = rejection == LearningStatus::MIXED_CONTEXT ? "context_changed" : "paused";
@@ -102,11 +125,18 @@ class Runtime : public esphome::ota::OTAGlobalStateListener {
   void prepare_restart() {
     if (!storage_) return;
     auto& state = storage_[0];
-    if (state.restart_prepared) return;
+    if (state.restart_prepared) {
+      // OTA retry can start before the paused learner runs again. Reuse only
+      // the verified prefix, without a second save or changed RAM accumulator.
+      daily_restart_ticket.arm(state.journal, state.restart_checkpoint_verified);
+      return;
+    }
     if (state.reset_requested) tick();  // A pending explicit reset wins over persistence.
     const auto clock = id(oq_time).now();
     if (state.daily_restore_pending || !state.learner.initialized || state.reset_requested || !clock.is_valid()) return;
-    save_checkpoint_(state, clock.timestamp, oq_sources::monotonic_ms(), true);
+    const bool saved = save_checkpoint_(state, clock.timestamp, oq_sources::monotonic_ms(), true);
+    state.restart_checkpoint_verified = saved;
+    daily_restart_ticket.arm(state.journal, saved);
     // Keep the RAM prefix even if storage failed; a failed OTA can resume it.
     state.restart_prepared = true;
     if (state.journal.loaded && state.learner.batch_accumulator.active) {
@@ -130,6 +160,7 @@ class Runtime : public esphome::ota::OTAGlobalStateListener {
     } else if (ota_state == esphome::ota::OTA_IN_PROGRESS) {
       state.ota_pause.progress(component, oq_sources::monotonic_ms());
     } else if (ota_state == esphome::ota::OTA_ERROR || ota_state == esphome::ota::OTA_ABORT) {
+      if (state.ota_pause.owner == component) daily_restart_ticket.clear();
       state.ota_pause.failed(component);
     }
   }
@@ -174,25 +205,14 @@ class Runtime : public esphome::ota::OTAGlobalStateListener {
     build_context_(state);
     const bool enabled = id(oq_ph_learning_enabled).state;
     auto& input = state.input;
-    // Configuration ownership remains valid during a temporary missing value.
-    // Snapshot validation decides whether to hold or interrupt the day. Real
-    // configuration/valid-route changes still interrupt unfinished intervals.
+    // Selected values and routes may change during a day. Only calibration or
+    // hardware changes alter the physical measurement context.
     const bool context_valid = state.context_size > 0 && source_configuration_available(state.sources);
-    const bool sources_changed = context_valid && observe_source_revisions(state.source_revisions, state.sources);
-    const bool valid_sources_changed =
-        context_valid && observe_valid_source_revisions(state.valid_source_revisions, state.sources);
     const bool context_bytes_changed =
         context_valid && (state.context_size != state.learner.context_size ||
                           memcmp(state.context, state.learner.context_bytes, state.context_size) != 0);
-    // While waiting for boot sources, their first resolution must not rebind
-    // the learner and erase a checkpoint restored in this same tick. Real
-    // configuration changes and changes of already observed routes still do.
-    const bool startup_resolution = (!state.journal.loaded || state.daily_restore_pending) &&
-                                    !state.measurement_context_changed && !context_bytes_changed &&
-                                    !valid_sources_changed;
     const bool context_changed =
-        state.learner.initialized &&
-        (state.measurement_context_changed || context_bytes_changed || (sources_changed && !startup_resolution));
+        state.learner.initialized && (state.measurement_context_changed || context_bytes_changed);
     if (context_changed) {
       state.daily_restore_pending = false;
       if (state.daily_restore_allowed) state.daily_resume_reason = "context_changed";
@@ -232,6 +252,10 @@ class Runtime : public esphome::ota::OTAGlobalStateListener {
               records, now_ms)) {
         restore_passive_records(state.learner, records, epoch);
         state.pending_daily = records;
+        if (!state.boot_restart_ticket.matches(state.journal.sequence, records)) {
+          state.daily_restore_allowed = false;
+          if (strcmp(state.daily_resume_reason, "none") == 0) state.daily_resume_reason = "restart_unconfirmed";
+        }
         state.daily_restore_pending = enabled && state.daily_restore_allowed && records.has_daily_checkpoint();
         if (records.has_daily_checkpoint() && !state.daily_restore_allowed) state.daily_resume_status = "discarded";
         if (state.daily_restore_pending) state.daily_resume_status = "waiting_for_sources";
@@ -298,6 +322,7 @@ class Runtime : public esphome::ota::OTAGlobalStateListener {
           daily_resume_decision(enabled && state.daily_restore_allowed, valid_daily_observation, epoch,
                                 state.learner.batch_accumulator.last_epoch_s, batch.may_bridge_daily_gap);
       if (decision == DailyResumeDecision::WAIT) return;
+      daily_restart_ticket.clear();
       state.restart_prepared = false;
       if (decision == DailyResumeDecision::RESTORE) {
         state.learner.batch_accumulator.restart_pending = true;
@@ -373,6 +398,8 @@ class Runtime : public esphome::ota::OTAGlobalStateListener {
   bool setup_() {
     if (allocation_attempted_) return false;
     allocation_attempted_ = true;
+    const auto boot_ticket = esp_reset_reason() == ESP_RST_SW ? boot_restart_ticket : DailyRestartTicket{};
+    boot_restart_ticket = {};
     if (!storage_.allocate()) {
       const char* error =
           "{\"schema\":1,\"mode\":\"passive\",\"storage_ready\":false,\"status\":\"psram_allocation_failed\",\"auto_"
@@ -381,18 +408,15 @@ class Runtime : public esphome::ota::OTAGlobalStateListener {
       return false;
     }
     auto& state = storage_[0];
+    state.boot_restart_ticket = boot_ticket;
     esphome::ota::get_global_ota_callback()->add_global_state_listener(this);
     state.partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "openquatt_data");
     state.journal.setup(state.partition != nullptr &&
                         OpenQuattFlashLayout::HOUSE_LEARNING_END_OFFSET <= state.partition->size);
-    watch_measurement_select_(id(room_temp_source));
-    watch_measurement_select_(id(room_setpoint_source));
-    watch_measurement_select_(id(outside_temp_source));
-    watch_measurement_select_(id(flow_source));
-    watch_measurement_select_(id(oq_duo_outdoor_flow_mode));
+    // Source choices use the normal selected-sensor refresh. Do not clear their
+    // live caches between a select event and that refresh: it would invent a gap.
     watch_measurement_select_(id(hp_generation));
 #if OQ_HARDWARE_HEATPUMP_CONTROLLER_Q
-    watch_measurement_select_(id(oq_q_flow_source));
     watch_measurement_select_(id(oq_controller_flow_meter));
     watch_measurement_number_(id(oq_custom_flow_pulses_per_liter));
 #endif
@@ -411,7 +435,6 @@ class Runtime : public esphome::ota::OTAGlobalStateListener {
     watch_measurement_number_(id(hp2_water_in_temp_offset));
     watch_measurement_number_(id(hp2_water_out_temp_offset));
 #endif
-    id(cic_feed_url).add_on_state_callback([this](const std::string&) { this->measurement_context_changed(); });
     return true;
   }
 
@@ -495,7 +518,7 @@ class Runtime : public esphome::ota::OTAGlobalStateListener {
     const bool boiler_heat_observed =
         id(oq_boiler_output_request) || id(boiler_relay).state || applied_ot_command_active ||
         (live_measurement_fresh(boiler_telemetry, now_ms) && boiler_telemetry.value == BoilerHeatState::HEAT_ACTIVE);
-    if (const char* reason = daily_restart_interruption_reason(in, boiler_heat_observed)) {
+    if (const char* reason = daily_restart_interruption_reason(in, boiler_heat_observed, state.config.quality)) {
       if (state.daily_restore_allowed) state.daily_resume_reason = reason;
       state.daily_restore_allowed = false;
     }
@@ -524,22 +547,11 @@ class Runtime : public esphome::ota::OTAGlobalStateListener {
     u32(kLearningAlgorithmVersion);
     u32(static_cast<uint32_t>(state.input.topology));
     u32(OQ_HARDWARE_HEATPUMP_CONTROLLER_Q);
-    for (const auto& source : state.sources) {
-      // Runtime route changes are tracked by source generations. Persist only
-      // configuration here so ordinary pump stops do not change the context.
-      u32(source.configuration.selected);
-      u32(source.configuration.auxiliary_a);
-      u32(source.configuration.auxiliary_b);
-    }
-    str(id(room_temp_source).current_option());
-    str(id(room_setpoint_source).current_option());
-    str(id(outside_temp_source).current_option());
-    str(id(flow_source).current_option());
-    str(id(oq_duo_outdoor_flow_mode).current_option());
+    // Keep source selection out of persisted ownership as well as live ticks.
+    // The marker distinguishes this compact context from legacy source layouts.
+    u32(kLearningMeasurementContextMarker);
     str(id(hp_generation).current_option());
-    str(id(cic_feed_url).state);
 #if OQ_HARDWARE_HEATPUMP_CONTROLLER_Q
-    str(id(oq_q_flow_source).current_option());
     str(id(oq_controller_flow_meter).current_option());
     f32(id(oq_custom_flow_pulses_per_liter).state);
 #endif

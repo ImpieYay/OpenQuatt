@@ -72,6 +72,14 @@ De thermostaat blijft het einddoel bepalen. De functie staat standaard uit;
 zie [Verwarmen en comfort](dagelijks/verwarmen.md#geleidelijk-opwarmen-na-nachtverlaging)
 voor een voorbeeld van 17 naar 20,5 °C.
 
+## Na een herstart of firmware-update
+
+Power House wacht maximaal twee minuten vanaf de herstart op geldige inputs voor de warmtevraag, waaronder buitentemperatuur, kamertemperatuur en setpoint. Tijdens het wachten is de warmtevraag onbekend en geeft Power House geen compressor- of ketelhulpvraag door. Ontbrekende inputs worden niet als vorige warmtevraag van 0 W opgeslagen.
+
+De eerste geldige berekening begint daardoor direct bij de actuele woningbehoefte plus kamercorrectie. Daarna gelden de normale opbouw- en afbouwtijd. Blijven inputs na twee minuten ongeldig, dan vraagt Power House veilig 0 W en meldt `input_timeout` als strategie-status. Zodra de inputs alsnog geldig worden, kan de regeling starten. Inputuitval tijdens een bestaande regeling houdt het normale veilige stop- en herstelgedrag.
+
+De compressorbeveiligingen blijven actief. Een firmware-update kan de ODU daarom nog steeds stoppen; de verplichte bevestiging van stilstand en minimale stilstandtijd blijven gelden.
+
 ## Waar kijkt Power House vooral naar?
 
 De kern bestaat uit vijf onderdelen.
@@ -123,6 +131,12 @@ Bij aanhoudend te koud zijn bouwt de regeling een kleine herstelcorrectie (*comf
 `Comfort above` heeft meerdere effecten. Met onder- en bovenmarge begrensd op 0–2 °C is de maximale interne verschuiving `clamp(0,05 + 0,50 × comfort above, 0,08, 0,20) °C`. De opbouw hangt af van de achterstand en duurt bij constante achterstand ongeveer 24–90 minuten tot dit maximum. Afbouw begint boven het midden van `setpoint − comfort below` en `setpoint + comfort above`: op een tempo van het maximum per 40 minuten, of per 12 minuten boven de laatste grens. Een grotere bovenmarge geeft dus niet onbeperkt meer herstelcorrectie en is geen toegestane temperatuuroverschrijding.
 
 De directe berekening gebruikt `min(setpoint + memory − comfort below, warme grens)` als koude correctiegrens. Op of boven de warme grens is geen positieve kamercorrectie mogelijk; erboven wordt warmte teruggenomen. De gewenste temperatuur blijft ongewijzigd. Bij ondermarge **0,1 °C** en opgebouwde verschuiving **0,2 °C** kan bij **21,05 °C** en setpoint **21,0 °C** dus nog positieve correctie bestaan. Bij ondermarge **0,2 °C** en hetzelfde maximum is dat boven het setpoint niet mogelijk.
+
+#### Kamerherstel tot de gewenste temperatuur
+
+Na een bevestigde start doordat de kamer onder de koude grens zit, ondersteunt Power House de herstelrun met het laagste geschikte warmtepompvermogen tot de gemeten kamertemperatuur het setpoint bereikt. Bij een setpoint van **20,0 °C** en ondermarge **0,1 °C** kan de startvraag vanaf **19,9 °C** ontstaan; de minimumondersteuning blijft vervolgens ook bij **19,96 °C** actief tot **20,0 °C**.
+
+Daarna neemt de gewone vermogensregeling het over. Het setpoint bereiken is geen harde stop: bij voldoende warmtevraag kan de warmtepomp blijven draaien. Dit kamerherstel werkt ook met **Langer doorverwarmen** uit. Die aparte optie ondersteunt lage warmtevraag tot een hogere stoptemperatuur. Waterbegrenzing en veiligheidsvoorwaarden blijven leidend; een setpointverlaging, ingetrokken warmtetoestemming of ongeldige kamerdata kan het herstel eerder beëindigen.
 
 #### Rekenvoorbeeld van warmtevraag
 

@@ -113,7 +113,7 @@ struct Simulation {
   }
 };
 
-void test_tester_trace_before_and_after() {
+void test_ordinary_recovery_and_warmup_step_handoff() {
   for (bool fixed : {false, true}) {
     Simulation sim;
     sim.tick(2000, 20.05859375f, 22, true, fixed);
@@ -122,13 +122,19 @@ void test_tester_trace_before_and_after() {
     assert(sim.compressor);
     sim.tick(122000, 20.05859375f, 22, true, fixed);
     sim.tick(182000, 20.09765625f, 22, true, fixed);
-    const auto release = sim.tick(242000, 20.109375f, 22, true, fixed);
+    const auto retained = sim.tick(242000, 20.109375f, 22, true, fixed);
     assert(sim.warmup.active());
     assert(std::fabs(sim.warmup.effective_target() - 20.15859375f) < 0.00001f);
+    // Ordinary recovery now also retains heating past the half restart band.
+    assert(retained.room_recovery_active && sim.compressor);
+    // It releases at the intermediate setpoint when the consumer runs first;
+    // warmup instead retains the run until the real thermostat comfort target.
+    const auto release = sim.tick(302000, 20.16796875f, 22, false, fixed);
     assert(release.room_recovery_active == fixed);
     assert(sim.compressor == fixed);
-    sim.tick(302000, 20.16796875f, 22, true, fixed);
+    sim.warmup.update(sim.input, sim.settings);
     sim.tick(362000, 20.16796875f, 22, true, fixed);
+    sim.tick(422000, 20.16796875f, 22, true, fixed);
     assert(std::fabs(sim.warmup.effective_target() - 20.26796875f) < 0.00001f);
     assert(sim.compressor);
     assert(sim.starts == (fixed ? 1 : 2));
@@ -372,7 +378,7 @@ void test_warmup_never_fabricates_a_thermostat_raise() {
 }  // namespace
 
 int main() {
-  test_tester_trace_before_and_after();
+  test_ordinary_recovery_and_warmup_step_handoff();
   test_existing_run_and_both_owner_orderings();
   test_step_comfort_matrix_and_noise();
   test_permission_freshness_water_limit_and_invalid_goal();

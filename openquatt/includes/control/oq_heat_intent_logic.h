@@ -136,8 +136,8 @@ inline Decision evaluate(const Input& input, State state) {
        (state.room_confirm_since_ms != 0 &&
         static_cast<uint32_t>(input.now_ms - state.room_confirm_since_ms) >= input.room_confirm_ms));
 
-  // Ordinary recovery belongs to a confirmed room-demand start. Warmup may
-  // also retain an already running HP: it needs no new compressor start and
+  // Ordinary recovery retains a confirmed room-demand start until the setpoint.
+  // Warmup may also retain an already running HP: it needs no new compressor start and
   // must survive the pending-raise/step handoff before the 1s owner tick.
   const bool warmup_recovery =
       input.controlled_warmup && input.room_c < observed_setpoint_c - input.room_resume_delta_c;
@@ -153,9 +153,9 @@ inline Decision evaluate(const Input& input, State state) {
   }
   // Keep minimum viable heating through intermediate steps, also when the
   // consumer runs before the 1s warmup owner has advanced the next target.
-  // Release at real comfort; ordinary recovery keeps its existing hysteresis.
-  const float recovery_release_c = input.controlled_warmup ? observed_setpoint_c - input.room_resume_delta_c
-                                                           : input.setpoint_c - 0.5f * input.room_resume_delta_c;
+  // Release at real comfort; ordinary recovery releases at the full setpoint.
+  const float recovery_release_c =
+      input.controlled_warmup ? observed_setpoint_c - input.room_resume_delta_c : input.setpoint_c;
   if (state.room_recovery_active && input.room_c >= recovery_release_c) state.room_recovery_active = false;
 
   out.fast_start =

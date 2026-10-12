@@ -98,6 +98,7 @@
     ["houseLearningReset", DOMAIN_BUTTON, "Power House Learning Reset"],
     ["performanceTelemetryEnabled", DOMAIN_SWITCH, "Performance model validation"],
     ["performanceTelemetryChoiceConfigured", DOMAIN_BINARY_SENSOR, "Performance model validation choice configured"],
+    ["performanceTelemetryPromptHandled", DOMAIN_BINARY_SENSOR, "Performance model validation prompt handled"],
     ["hpGeneration", DOMAIN_SELECT, "Quatt Hybrid version", false],
     ["electricalCurrentLimit", DOMAIN_NUMBER, "Electrical current limit"],
     ["strategy", DOMAIN_SELECT, "Heating Control Mode", false],
@@ -572,6 +573,12 @@
     ["phRunExtensionStopMargin", DOMAIN_NUMBER, "Power House run extension stop margin"],
     ["phRunExtensionRestartCooldown", DOMAIN_NUMBER, "Power House run extension restart cooldown"],
     ["phRunExtensionStatus", DOMAIN_TEXT_SENSOR, "Power House run extension status"],
+    ["phRunExtensionBasePower", DOMAIN_SENSOR, "Power House run extension base power"],
+    ["phRunExtensionFloorPower", DOMAIN_SENSOR, "Power House run extension floor power"],
+    ["phRunExtensionState", DOMAIN_SENSOR, "Power House run extension state"],
+    ["phComfortMemory", DOMAIN_SENSOR, "Power House – comfort memory"],
+    ["phRunExtensionComfortStop", DOMAIN_SENSOR, "Power House run extension comfort stop"],
+    ["phRunExtensionWarmRestart", DOMAIN_SENSOR, "Power House run extension warm restart"],
     ["warmupEnabled", DOMAIN_SWITCH, "Controlled warmup enabled"],
     ["warmupTrigger", DOMAIN_NUMBER, "Controlled warmup trigger"],
     ["warmupStep", DOMAIN_NUMBER, "Controlled warmup step"],
@@ -1398,6 +1405,7 @@
     "curveModifier",
     "curveRoomTrim",
     "curveEffectiveTarget",
+    "heatingSupplyTargetActiveSource",
   ];
   export const EXCLUDED_FREQUENCY_KEYS = [
     "hp1ExcludeMinHz", "hp1ExcludeMaxHz", "hp2ExcludeMinHz", "hp2ExcludeMaxHz",
@@ -1423,9 +1431,31 @@
     { minutes: 15, label: "15 min" },
     { minutes: 30, label: "30 min" },
     { minutes: 60, label: "60 min" },
+    { minutes: 120, labelKey: "debugRecording.range2h" },
+    { minutes: 360, labelKey: "debugRecording.range6h" },
     { minutes: 0, label: "Alles", labelKey: "debugRecording.rangeAll" },
   ];
   export const SYSTEM_RECORDER_ANALYSER_URL = "https://openheatpumps.nl";
+  // Firmware-owned configuration snapshot, independent of settings backups.
+  // Only non-sensitive persisted settings; live inputs and credentials stay out.
+  export const DEBUG_CONFIGURATION_KEYS = [
+    "phRunExtension",
+    "phRunExtensionStopMargin",
+    "phRunExtensionRestartCooldown",
+    "roomTempSource",
+    "roomSetpointSource",
+    "outsideTempSource",
+    "minRuntime",
+    "maxWater",
+    "electricalCurrentLimit",
+    "hpGeneration",
+    "dayMaxHz",
+    "silentMaxHz",
+    "hp1ExcludeMinHz",
+    "hp1ExcludeMaxHz",
+    "hp2ExcludeMinHz",
+    "hp2ExcludeMaxHz",
+  ];
   export const DEBUG_RECORDING_KEYS = [
     "projectVersionText",
     "releaseChannelText",
@@ -1670,6 +1700,15 @@
     "hp2FourWay",
     "boilerCommandHeatRequest",
     "boilerRelayTargetState",
+    "phRunExtensionStatus",
+    "phRunExtensionBasePower",
+    "phRunExtensionFloorPower",
+    "phRunExtensionState",
+    "phComfortMemory",
+    "phRunExtensionComfortStop",
+    "phRunExtensionWarmRestart",
+    "roomTempEffectiveSource",
+    "roomSetpointEffectiveSource",
   ];
   export const FIRMWARE_ENTITY_KEYS = ["firmwareUpdate", "firmwareUpdateChannel", "firmwareUpdateTarget", "firmwareUpdateProgress", "firmwareUpdateStatus"];
   export const FIRMWARE_TEST_ENTITY_KEYS = ["firmwareTestManifestUrl", "installFirmwareTestManifest"];
@@ -1677,6 +1716,9 @@
   export const FIRMWARE_MODAL_KEYS = [...FIRMWARE_ENTITY_KEYS, ...FIRMWARE_TEST_ENTITY_KEYS, ...FIRMWARE_TEST_LEGACY_ENTITY_KEYS, "installFirmwareUpdateTarget", "projectVersionText", "releaseChannelText", "installationTopology", "hardwareProfileText", "connectionText", "preferredConnection"];
   export const TOPOLOGY_HINT_KEYS = ["hp2ExcludeMinHz", "hp2Power", "hp2WaterOut"];
   export const HEADER_ENTITY_KEYS = [
+    "performanceTelemetryEnabled",
+    "performanceTelemetryChoiceConfigured",
+    "performanceTelemetryPromptHandled",
     "status",
     "uptime",
     "uptimeReadable",
@@ -1795,6 +1837,9 @@
     ...HP_PANEL_ENTITY_KEYS,
   ];
   export const CONTROL_REPLAY_STATE_KEYS = [
+    "phRunExtension",
+    "phRunExtensionStatus",
+    "phRunExtensionComfortStop",
     "strategyActiveCode",
     "strategyRequestActive",
     "strategyWaterTripActive",
@@ -2073,6 +2118,14 @@
     "otLinkProblem",
     "otbChCommand",
     "otbControlSetpointCommand",
+    // Live API inputs are runtime state, not persisted settings. Restoring a
+    // default or stale value would mark it freshly valid.
+    "apiInputOutsideTemperature",
+    "apiInputRoomTemperature",
+    "apiInputRoomSetpoint",
+    "apiInputHeatingEnable",
+    "apiInputCoolingEnable",
+    "apiInputCoolingDewPoint",
     // A live power request rather than a persisted setting: restoring it
     // would re-assert a stale demand and mark it freshly valid.
     "apiInputExternalHeatDemand",
@@ -2149,12 +2202,6 @@
         "externalHeatDemandSource",
         "heatingSupplyTargetSource",
         "heatingCurveModifierSource",
-        "apiInputOutsideTemperature",
-        "apiInputRoomTemperature",
-        "apiInputRoomSetpoint",
-        "apiInputHeatingEnable",
-        "apiInputCoolingEnable",
-        "apiInputCoolingDewPoint",
       ],
     },
     {

@@ -23,6 +23,34 @@ OpenQuatt is driven from explicit matrix entrypoints under `configs/`:
 - `configs/heatpump_controller_q/single.yaml`
 - `configs/heatpump_controller_q/duo.yaml`
 
+The entrypoints pin the topology build flag and build directory. The hardware
+profile owns the pin map and UART RX pull-up; `openquatt/topology/single.yaml`
+and `duo.yaml` are complete ESPHome packages with topology substitutions and,
+for Duo, the HP2 package. There are no separate topology wrapper files.
+
+Custom entrypoints should include `topology/single.yaml` or `topology/duo.yaml`
+under `packages`, replacing the former `single_package.yaml` or
+`duo_package.yaml` include. Remove a separate `duo_packages.yaml` include;
+Duo already contains it. A direct `substitutions: !include` of a topology file
+must also become a package include. Hard-coded Q profile-fragment paths must
+use the new `profiles/heatpump_controller_q/` subdirectory.
+
+Only `single.yaml`, `duo.yaml` and `duo_hil.yaml` remain under
+`configs/heatpump_controller_q/`. Each firmware supports both WiFi and Ethernet;
+select the preferred connection at runtime. The historical YAML aliases have
+been removed. Update custom includes and saved commands as follows:
+
+| Removed entrypoints | Canonical entrypoint |
+| --- | --- |
+| `single_wifi.yaml`, `single_eth.yaml` | `single.yaml` |
+| `duo_wifi.yaml`, `duo_eth.yaml` | `duo.yaml` |
+| `duo_wifi_hil.yaml` | `duo_hil.yaml` |
+
+Historical release-artifact aliases remain available for existing download and
+OTA paths. `duo_hil.yaml` has a separate testcontroller identity; scenario
+overlays live under `scripts/hil/configs/` and are excluded from
+`build_targets.yaml`.
+
 Each entrypoint includes:
 
 - global project/board/framework config from `openquatt/base/common.yaml`
@@ -385,6 +413,14 @@ HP-saturation and cold-start paths.
 ## 9. Hardware Profiles and Pin Strategy
 
 The Heatpump Controller Q-edition profile is defined in `openquatt/profiles/heatpump_controller_q.yaml`.
+
+This entrypoint owns the pin/capability map and Q release-manifest templates.
+Its modules are grouped under `openquatt/profiles/heatpump_controller_q/`: local
+PT1000/flow sensors, hardware revision, status LEDs and CiC compatibility.
+The hardware-revision C++ helper lives under `openquatt/includes/hardware/`
+and is included through the shared header directory. Headers from that
+directory must not also be listed individually in `esphome.includes`; ESPHome
+would create a second flat copy whose `#pragma once` recognition can depend on mtime.
 
 Shared non-hardware constants are in `openquatt/oq_substitutions_common.yaml`.
 

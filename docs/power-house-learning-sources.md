@@ -52,11 +52,27 @@ vanzelf de dagmeting voor de woninglijn. Beide routes blijven passief.
 Ontbrekende metingen worden nooit vervangen door nul. De voorwaarden voor korte
 meetonderbrekingen en hervatten na een herstart staan hieronder.
 
+Bij stoppen kan werkmodusregister `2099` al uitstand melden terwijl
+compressorfrequentie `2103` nog boven nul staat. Als alle overige metingen en
+bedrijfsinformatie geldig zijn, behoudt een lopende dag deze korte overgang.
+De overgang telt niet als geldige vermogensmeting: de bestaande interpolatie en
+het onzekerheidsbudget gelden zodra consistente metingen terugkeren. Het hele
+interval tussen de geldige meetpunten mag maximaal 120 seconden duren. Een andere
+gelijktijdige meetfout of een te lange overgang onderbreekt de dag wel. Deze
+uitzondering start geen nieuwe dag met tegenstrijdige gegevens; de 1R1C-route en
+de strengere bedrijfstoestandcontrole bij herstel na boot blijven ongewijzigd.
+
 ## Context en opslag
 
-Een wijziging van een geselecteerde bronroute, waterkalibratie of andere fysieke
-meetcontext start een nieuwe `context_revision` en onderbreekt alleen lopende
-meetintervallen. Afgeronde records en het 1R1C-model blijven behouden.
+Automatische en handmatige bronwissels voor kamer, setpoint, buiten en flow laten
+de lopende dagmeting en het 1R1C-interval doorlopen. Ook een wissel tussen een
+actuele en geldig vastgehouden waarde is geen nieuwe meetcontext. De learner
+gebruikt vanaf de volgende normale bronselectie de nieuwe geselecteerde waarde;
+ontbrekende of ongeldige metingen blijven onder de normale meetgat- en
+kwaliteitscontroles vallen.
+Waterkalibratie, flowmeterkalibratie of een wijziging van de hardwaremeetcontext
+start wel een nieuwe `context_revision` en onderbreekt lopende meetintervallen.
+Afgeronde records en het 1R1C-model blijven behouden.
 Een wijziging van regel- of beoordelingsinstellingen herbeoordeelt bestaande records
 zonder de fysieke metingen te wissen.
 
@@ -66,10 +82,11 @@ krijgt iedere 15 minuten een checkpoint; zonder dagprogressie blijft de grens vo
 nieuwe modelgegevens eenmaal per uur. Vlak vóór een normale herstart of OTA wordt
 extra opgeslagen. Een afgebroken schrijfoperatie laat het vorige geldige slot intact;
 een opslagfout wordt gemeld en leidt deze boot niet tot herhaalde schrijfpogingen.
-Dat geldt ook als het verwijderen van een vervallen dagcheckpoint mislukt: na een
-volgende boot kan het oudere checkpoint nog leesbaar zijn en binnen de normale
-hervatgrens alsnog worden gebruikt. Een eerdere, niet opgeslagen afwijzing is dan
-niet bekend. Afgeronde historie wordt niet gewist om dit te voorkomen; leren blijft passief.
+Een dagcheckpoint mag alleen hervatten na een geplande softwareherstart of OTA,
+met een eenmalige bevestiging in RTC-geheugen voor de succesvol opgeslagen kopie.
+Die bevestiging wordt bij boot verbruikt. Een oude kopie kan daardoor niet opnieuw
+hervatten als het verwijderen van een verworpen dag later mislukt. Afgeronde
+historie en het 1R1C-model blijven onafhankelijk herstelbaar; leren blijft passief.
 
 Schema 7 voegt het dagcheckpoint toe; schema 4/5/6 blijven leesbaar. Oude firmware
 kan schema 7 niet lezen. De eerste OTA vanuit firmware zonder dagcheckpoint kan de
@@ -81,7 +98,8 @@ meetwaarden en dezelfde meetcontext. Tijdens de eerste bronopstart na een boot m
 het checkpoint kort wachten op nog ontbrekende bedrijfstelemetrie; dit zijn geen
 geldige metingen en de grens van 120 seconden wordt niet verlengd. Een daadwerkelijk
 waargenomen ongeldige bedrijfstoestand of ontvangen ongeldige bedrijfstelemetrie
-breekt het herstel af; latere verbetering herstelt die dag niet alsnog.
+breekt het herstel af; latere verbetering herstelt die dag niet alsnog. Dit geldt
+ook voor ontvangen ongeldige meetwaarden vóór de klok is gesynchroniseerd.
 De hele onderbreking vanaf het laatste opgeslagen geldige meetpunt tot
 de eerste geldige nieuwe meting mag maximaal 120 seconden zijn, inclusief upload,
 herstart en het beschikbaar komen van de bronnen. De ontbrekende warmte wordt
@@ -94,15 +112,18 @@ maar het onafgeronde 30-minuteninterval begint opnieuw.
 
 Voorbeeld: na 18 uur meten volgt een herstart. Zijn na 90 seconden weer geldige
 metingen beschikbaar en past het meetgat binnen het budget, dan loopt dezelfde dag
-verder tot 24 uur. Bij stroomuitval of een fysieke reset ontbreekt een shutdown-hook;
-herstel gebruikt het laatste periodieke checkpoint. Daardoor kan maximaal 15 minuten
-niet opgeslagen zijn en kan de totale meetonderbreking te lang zijn om de dag te hervatten.
+verder tot 24 uur. Bij stroomuitval, een fysieke reset of crash begint de lopende
+dag opnieuw; ook bij een ontbrekende bevestiging na een firmwarewissel. Afgeronde
+leerdata blijven behouden. Een mislukte opslag vóór de geplande herstart geeft
+geen hervatbevestiging en begint eveneens een nieuwe dag.
 Tijdens verzamelen zijn maximaal 96 periodieke checkpointwrites per dag nodig, plus
 geplande herstarts/OTA; het journal blijft beperkt tot de bestaande twee 8 KiB-slots.
-Bij automatische bronkeuze wordt alleen de selectorconfiguratie opgeslagen, niet
-de effectieve bronroute van de vorige boot. Identieke selectie garandeert daarom
-geen identieke effectieve route over een herstart; echte routewijzigingen die deze
-boot al zijn waargenomen verhinderen herstel wel.
+Het dagcheckpoint is gekoppeld aan hardware en meetkalibratie, niet aan de
+bronkeuze. Een andere automatische of handmatige bronkeuze verhindert herstel dus
+niet. Bestaande schema-7-checkpoints met broninstellingen in hun meetcontext blijven
+hervatbaar wanneer de fysieke meetcontext gelijk is; schema en CRC veranderen niet.
+De overige voorwaarden voor hervatten, waaronder de RTC-bevestiging en meetgatgrens,
+blijven gelden.
 Een afgebroken webupload mag het leren niet blijvend pauzeren: zonder nieuwe
 OTA-voortgangsmelding vervalt de interne pauze na circa twee minuten.
 De normale controllerpauze voor native/HTTP-request OTA blijft onafhankelijk gelden.

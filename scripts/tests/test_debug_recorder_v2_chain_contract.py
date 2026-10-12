@@ -11,7 +11,7 @@ HP_IO = (ROOT / "openquatt" / "oq_HP_io.yaml").read_text()
 SUPERVISORY_RUNTIME = (
     ROOT / "openquatt" / "includes" / "control" / "oq_supervisory_state_runtime.h"
 ).read_text()
-DUO_PACKAGES = (ROOT / "openquatt" / "topology" / "duo_packages.yaml").read_text()
+DUO_PACKAGES = (ROOT / "openquatt" / "topology" / "duo.yaml").read_text()
 RECORDER_SOURCE = (
     ROOT / "components/openquatt_debug_recorder/OpenQuattDebugRecorder.cpp"
 ).read_text()
@@ -160,7 +160,7 @@ class DebugRecorderV2ChainContractTest(unittest.TestCase):
         header_capacity = int(re.search(r"FIELD_CAPACITY = (\d+)", RECORDER_HEADER).group(1))
         header_system = int(re.search(r"SYSTEM_FIELD_COUNT = (\d+)", RECORDER_HEADER).group(1))
         self.assertEqual(header_capacity, 272)
-        self.assertEqual(header_system, 5)
+        self.assertEqual(header_system, 6)
         self.assertLessEqual(243, header_capacity - header_system)
 
     def test_power_input_diagnostics_include_model_ids_and_quality(self) -> None:
@@ -203,7 +203,7 @@ class DebugRecorderV2ChainContractTest(unittest.TestCase):
         flow_control = (ROOT / "openquatt" / "oq_flow_control.yaml").read_text()
         cic = (ROOT / "openquatt" / "oq_cic.yaml").read_text()
         cic_source = (ROOT / "components" / "openquatt_cic" / "OpenQuattCIC.cpp").read_text()
-        q_profile = (ROOT / "openquatt" / "profiles" / "heatpump_controller_q.yaml").read_text()
+        q_profile = (ROOT / "openquatt" / "profiles" / "heatpump_controller_q" / "local_sensors.yaml").read_text()
         self.assertIn('name: "Flow Source"', sensor_sources)
         self.assertIn('name: "Flow Selected Route"', sensor_sources)
         self.assertIn('name: "Outdoor Unit Flow Mode"', sensor_sources)

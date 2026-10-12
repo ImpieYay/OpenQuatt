@@ -71,8 +71,9 @@ recovery direct gebruiken met geldige bronnen en warmtetoestemming; dit is geen
 nieuwe start en omzeilt de downstream guards niet. Bij verlaten van de limiter
 worden recovery en startbevestiging gewist, zodat normaal regelen geen oude
 warmup-floor erft. Een onafhankelijk gestopte HP verliest het warmup-runrecht;
-een herstart moet de warmtevraag opnieuw bevestigen. Buiten warmup blijft de
-bestaande halve restartband gelden.
+een herstart moet de warmtevraag opnieuw bevestigen. Buiten warmup blijft
+kamerherstel na een bevestigde start actief tot het volledige setpoint is bereikt,
+zoals in de normale regeling op `dev` (#814).
 `control_target` verbergt de limiter ook direct bij een lager actueel setpoint,
 zonder de sessie in een getter te muteren. Alleen `update` legt die overgang vast.
 De extra session-scope bool past in de bestaande 20 B heat-intent state; er komen

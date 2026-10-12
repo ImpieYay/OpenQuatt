@@ -400,6 +400,7 @@ import { formatDate, formatNumber, formatTime, getIntlLocale, optionLabel, t } f
 
   const CONTROL_WORKING_REASON_METAS = createControlWorkingReasonMetas([
 ["frequency_cap_below_minimum", "controlReplay.reasonFrequencyCapBelowMinimum", "controlReplay.reasonFrequencyCapBelowMinimumCopy", "controlReplay.reasonFrequencyCapBelowMinimumCheck1", "controlReplay.reasonFrequencyCapBelowMinimumCheck2"],
+["run_extension", "runExtension.extending", "controlReplay.curRunExtensionCopy", "controlReplay.runExtensionCheck1", "controlReplay.runExtensionCheck2"],
 ["keep_current", "controlReplay.reasonKeepCurrent", "controlReplay.reasonKeepCurrentCopy", "controlReplay.reasonKeepCurrentCheck1", "controlReplay.reasonKeepCurrentCheck2", "controlReplay.reasonKeepCurrentCheck3"],
 ["hold_active", "controlReplay.reasonHoldActive", "controlReplay.reasonHoldActiveCopy", "controlReplay.reasonHoldActiveCheck1", "controlReplay.reasonHoldActiveCheck2", "controlReplay.reasonHoldActiveCheck3"],
 ["defrost_hold", "controlReplay.reasonDefrostHold", "controlReplay.reasonDefrostHoldCopy", "controlReplay.reasonDefrostHoldCheck1", "controlReplay.reasonDefrostHoldCheck2", "controlReplay.reasonDefrostHoldCheck3"],
@@ -864,8 +865,8 @@ import { formatDate, formatNumber, formatTime, getIntlLocale, optionLabel, t } f
     const boilerActive = modeModel.boilerActive;
     const startupInhibit = getControlWorkingActiveStartupInhibit();
     let title = t("controlReplay.curOneHp");
-    let copy = t("controlReplay.curOneHpCopy");
-    let expectation = t("controlReplay.curOneHpExpect");
+    let copy = hp2Panel ? t("controlReplay.curOneHpCopy") : t("controlReplay.curSingleHpCopy");
+    let expectation = hp2Panel ? t("controlReplay.curOneHpExpect") : t("controlReplay.curSingleHpExpect");
     let severity = "normal";
     let primaryReason = "keep_current";
     let sinceLabel = t("controlReplay.curLive");
@@ -958,6 +959,18 @@ import { formatDate, formatNumber, formatTime, getIntlLocale, optionLabel, t } f
       severity = "limited";
       primaryReason = "defrost_hold";
       sinceLabel = t("controlReplay.curDefrostSince");
+    } else if (!duoActive
+      && heatPumpPanels.some((panel) => getEntityStateText(panel.keys.mode, "") === "Heating")
+      && getControlWorkingBlockingNumber("strategyActiveCode") === 3
+      && getControlWorkingBlockingFlag("phRunExtension") === true
+      && getEntityStateText("phRunExtensionStatus", "").trim().toLowerCase() === "extending") {
+      title = t("runExtension.extending");
+      copy = t("controlReplay.curRunExtensionCopy");
+      const stop = getControlWorkingBlockingNumber("phRunExtensionComfortStop");
+      expectation = Number.isFinite(stop)
+        ? t("controlReplay.curRunExtensionExpectTemp", { temperature: formatNumber(stop, { minimumFractionDigits: 1, maximumFractionDigits: 2 }) })
+        : t("controlReplay.curRunExtensionExpect");
+      primaryReason = "run_extension";
     } else if (duoActive) {
       title = t("controlReplay.curDuoTitle");
       copy = t("controlReplay.curDuoCopy");
@@ -2573,10 +2586,11 @@ import { formatDate, formatNumber, formatTime, getIntlLocale, optionLabel, t } f
     } else if (hpLabels.length === 1) {
       title = t("controlReplay.graphCtxSingleTitle", { source: hpLabels[0] });
       summary = t("controlReplay.graphCtxSingleCopy", { source: hpLabels[0] });
-      detail = t("controlReplay.graphCtxSingleDetail");
-      next = t("controlReplay.graphCtxSingleNext");
+      const hp2Available = getHeatPumpPanels().some((panel) => panel.title === "HP2");
+      detail = hp2Available ? t("controlReplay.graphCtxSingleDetail") : t("controlReplay.graphCtxSingleOnlyDetail");
+      next = hp2Available ? t("controlReplay.graphCtxSingleNext") : t("controlReplay.curSingleHpExpect");
       source = getDecisionModeSubjectLabel(hpLabels[0], 2);
-      reasonCode = primaryInterval.item?.reasonCode || "runtime_lead";
+      reasonCode = primaryInterval.item?.reasonCode || "keep_current";
     } else if (cvActive) {
       title = t("controlReplay.graphCtxBoilerTitle");
       summary = t("controlReplay.graphCtxBoilerCopy");
@@ -2763,7 +2777,7 @@ import { formatDate, formatNumber, formatTime, getIntlLocale, optionLabel, t } f
           <strong>${escapeHtml(current.expectation)}</strong>
           <div class="oq-working-source-strip">
             <span>HP1 · ${escapeHtml(current.hp1Status)}</span>
-            <span>HP2 · ${escapeHtml(current.hp2Status)}</span>
+            ${current.hp2Available ? `<span>HP2 · ${escapeHtml(current.hp2Status)}</span>` : ""}
             <span>CV · ${escapeHtml(current.cvStatus)}</span>
           </div>
         </div>
@@ -3037,7 +3051,7 @@ import { formatDate, formatNumber, formatTime, getIntlLocale, optionLabel, t } f
           ` : ""}
           <section class="oq-working-source-grid" aria-label="${t("controlReplay.statusSources")}">
             ${renderControlWorkingSourceCard("HP1", current.hp1Status, current.hp1Starts, current.hp1Hours, current.hp1Running)}
-            ${renderControlWorkingSourceCard("HP2", current.hp2Status, current.hp2Starts, current.hp2Hours, current.hp2Running)}
+            ${current.hp2Available ? renderControlWorkingSourceCard("HP2", current.hp2Status, current.hp2Starts, current.hp2Hours, current.hp2Running) : ""}
             ${renderControlWorkingSourceCard("CV", current.cvStatus, "", "", current.cvStatus === t("controlReplay.curCvActive"), coolingContextActive ? t("controlReplay.statusCvNoCooling") : t("controlReplay.statusCvSupport"))}
           </section>
           <section class="oq-working-guard-panel">
