@@ -69,7 +69,7 @@ Eén eigenaar in de ESPHome-mainloop beheert records en fitworkspace in PSRAM. T
 De actuele geselecteerde waarden blijven leidend voor bronkeuze. De learner neemt de waarde en
 geldigheid van die bestaande resolver over; hij voert geen tweede, afwijkende herkomstcontrole uit.
 OpenTherm, CiC, Home Assistant, API input en MQTT kunnen daardoor allemaal learning-bronnen zijn
-wanneer de regelaar ze geldig verklaart. Een routewijziging maakt wel een nieuwe meetcontext. Zie
+wanneer de regelaar ze geldig verklaart. Automatische en handmatige bronwissels onderbreken lopende metingen niet. Zie
 [broncontract](power-house-learning-sources.md).
 
 Passief leren introduceert geen hydraulisch installatieprofiel. De bestaande geselecteerde waarden
@@ -325,6 +325,6 @@ eerdere featureversie, nu bovenop `dev`: 919000 → 925000. CSS blijft raw gelij
 De nieuwe previewreset was geautomatiseerd gecontroleerd; de browsermatrix en Safari/iOS waren
 nog niet afgevinkt. De OTA-smoke-test bevestigt de nieuwe bronketen en één dynamische learning-sample.
 
-De config-only projectwrapper heeft drie bestaande stijlmeldingen in `configs/hil/input_sources_fast_duo_wifi.yaml`
+De config-only projectwrapper heeft drie bestaande stijlmeldingen in `scripts/hil/configs/input_sources_fast_duo.yaml`
 en `openquatt/oq_common.yaml`. Directe ESPHome-validatie blijft beschikbaar. Echte stroomonderbrekingen,
 herstel op de controller en geheugen-/timingbelasting zijn nog niet op de vereenvoudigde build getest.
