@@ -356,6 +356,12 @@ class Runtime {
         best_duo.valid && best_single.valid && best_duo.error_w + duo_enable_margin_w < best_single.error_w;
     const bool single_sufficient =
         best_single.valid && (!best_duo.valid || best_single.error_w <= best_duo.error_w + duo_disable_margin_w);
+    const int lead_applied_level = single_owner == 2 ? previous_hp2 : previous_hp1;
+    const float lead_applied_power_w = lead_applied_level > 0 ? level_power_w(single_owner != 2, lead_applied_level)
+                                                              : NAN;
+    const auto duo_floor = candidate(1, 1, 0.0f);
+    const bool duo_floor_reached =
+        oq_curve::duo_floor_reached(lead_applied_power_w, duo_floor.valid ? duo_floor.power_w : NAN);
     const bool dual_defrost = demand_active && hp1_valve_defrost && hp2_valve_defrost;
     const bool emergency_dual = demand_active && best_duo.valid && heat_phase && !startup_grace && !demand_rundown &&
                                 single_saturated && duo_better && std::isfinite(temperature_error_c) &&
@@ -367,7 +373,8 @@ class Runtime {
     const bool dual_on =
         demand_active && best_duo.valid && !startup_grace && !demand_rundown &&
         (forced_capacity || dual_defrost ||
-         (duo_better && dispatch_u >= duo_enable_min_u && (heat_phase ? single_saturated : !single_sufficient) &&
+         (duo_better && duo_floor_reached && dispatch_u >= duo_enable_min_u &&
+          (heat_phase ? single_saturated : !single_sufficient) &&
           (!std::isfinite(temperature_error_c) || temperature_error_c >= -0.05f)));
     const bool dual_off =
         !demand_active || !best_duo.valid || (!id(oq_dual_hp_enabled) && !dual_on) ||
