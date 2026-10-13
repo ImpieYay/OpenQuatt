@@ -51,7 +51,7 @@ esphome:
               return;
             }
 
-            const std::string hardware_slug = "heatpump-controller-q";
+            const std::string hardware_slug = "${oq_hardware_slug}";
             #if OQ_TOPOLOGY_DUO
             std::string topology = "duo";
             #else
@@ -576,7 +576,7 @@ script:
           const std::string url = id(oq_firmware_test_manifest_url).state;
           const std::string prefix =
               "https://github.com/OpenQuatt/OpenQuatt/releases/download/pr-";
-          const std::string hardware_slug = "heatpump-controller-q";
+          const std::string hardware_slug = "${oq_hardware_slug}";
           #if OQ_TOPOLOGY_DUO
           const std::string topology = "duo";
           #else
@@ -1134,7 +1134,7 @@ button:
                 const std::string url = id(oq_firmware_test_manifest_url).state;
                 const std::string prefix =
                     "https://github.com/OpenQuatt/OpenQuatt/releases/download/pr-";
-                const std::string hardware_slug = "heatpump-controller-q";
+                const std::string hardware_slug = "${oq_hardware_slug}";
                 #if OQ_TOPOLOGY_DUO
                 const std::string topology = "duo";
                 #else
