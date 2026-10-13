@@ -324,11 +324,14 @@ class Runtime {
     const int owner_max = single_owner == 2 ? hp2_max : hp1_max;
     const float owner_capacity_w = level_power_w(single_owner != 2, owner_max);
     float duo_capacity_w = 0.0f;
+    float duo_floor_w = NAN;
     for (int first = 1; first <= hp1_max; ++first)
       for (int second = 1; second <= hp2_max; ++second) {
         if (std::abs(first - second) > 1) continue;
         const auto item = candidate(first, second, 0.0f);
-        if (item.valid) duo_capacity_w = std::max(duo_capacity_w, item.power_w);
+        if (!item.valid) continue;
+        duo_capacity_w = std::max(duo_capacity_w, item.power_w);
+        duo_floor_w = std::isfinite(duo_floor_w) ? std::min(duo_floor_w, item.power_w) : item.power_w;
       }
 
     const bool demand_rundown = capped < previous_capped;
@@ -365,10 +368,11 @@ class Runtime {
         best_duo.valid && best_single.valid && best_duo.error_w + duo_enable_margin_w < best_single.error_w;
     const bool single_sufficient =
         best_single.valid && (!best_duo.valid || best_single.error_w <= best_duo.error_w + duo_disable_margin_w);
-    const int lead_level = single_owner == 2 ? previous_hp2 : previous_hp1;
-    const float lead_w = lead_level > 0 ? level_power_w(single_owner != 2, lead_level) : NAN;
-    const auto duo_floor = candidate(1, 1, 0.0f);
-    const bool floor_ok = oq_curve::duo_floor_reached(lead_w, duo_floor.valid ? duo_floor.power_w : NAN);
+    const bool lead_hp1 = single_owner != 2;
+    const int lead_level = lead_hp1 ? previous_hp1 : previous_hp2;
+    const int lead_request = lead_hp1 ? best_single.hp1_level : best_single.hp2_level;
+    const bool lead_ramping = lead_level > 0 && best_single.valid && lead_request > lead_level &&
+                              std::isfinite(level_power_w(lead_hp1, lead_level + 1));
     const bool dual_defrost = demand_active && hp1_valve_defrost && hp2_valve_defrost;
     const bool emergency_dual = demand_active && best_duo.valid && heat_phase && !startup_grace && !demand_rundown &&
                                 single_saturated && duo_better && std::isfinite(temperature_error_c) &&
@@ -377,12 +381,10 @@ class Runtime {
         emergency_dual ? id(oq_dual_hp_emergency_hold_elapsed_accum_min) + dt_min : 0.0f;
     const bool forced_capacity = id(oq_dual_hp_emergency_hold_elapsed_accum_min) >=
                                  static_cast<float>(std::max(1, tuning.dual_emergency_hold_min));
-    const bool dual_on =
-        demand_active && best_duo.valid && !startup_grace && !demand_rundown &&
-        (forced_capacity || dual_defrost ||
-         (duo_better && floor_ok && dispatch_u >= duo_enable_min_u &&
-          (heat_phase ? single_saturated : !single_sufficient) &&
-          (!std::isfinite(temperature_error_c) || temperature_error_c >= -0.05f)));
+    const bool dual_on = oq_curve::dual_hp_on(
+        {demand_active && best_duo.valid && !startup_grace && !demand_rundown, forced_capacity || dual_defrost,
+         duo_better, heat_phase ? single_saturated : !single_sufficient, dispatch_u >= duo_enable_min_u,
+         temperature_error_c, lead_ramping, lead_ramping ? level_power_w(lead_hp1, lead_level) : NAN, duo_floor_w});
     const bool dual_off =
         !demand_active || !best_duo.valid || (!id(oq_dual_hp_enabled) && !dual_on) ||
         (single_sufficient && dispatch_u <= duo_disable_max_u &&
