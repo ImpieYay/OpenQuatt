@@ -5,81 +5,57 @@
 namespace {
 using namespace oq_curve;
 
-// Maintain regime at full demand: the lead HP is still ramping (level 2, ~2.6 kW) and the lowest duo combination
-// would deliver ~3.3 kW.
-DualOnInput maintain_ramping() {
-  DualOnInput in;
-  in.eligible = true;
-  in.duo_better = true;
-  in.single_short = true;
-  in.demand_high = true;
-  in.temperature_error_c = 1.5f;
-  in.lead_ramping = true;
-  in.lead_power_w = 2600.0f;
+// Maintain regime at full demand: the single owner runs at level 2 (~2.6 kW) while dispatch requests level 6, and
+// the lowest duo combination would deliver ~3.3 kW.
+DuoFloorInput ramping_below_floor() {
+  DuoFloorInput in;
+  in.owner_level = 2;
+  in.owner_request = 6;
+  in.owner_may_step_up = true;
+  in.owner_power_w = 2600.0f;
   in.duo_floor_power_w = 3300.0f;
   return in;
 }
 
-// Regression: HP1 was added while HP2 was still ramping below the duo floor, overshot the demand and was shed again
-// after the disable hold, restarting ~13 minutes later.
-void test_ramping_lead_below_floor_waits() {
-  assert(!dual_hp_on(maintain_ramping()));
-  auto reached = maintain_ramping();
-  reached.lead_power_w = 3300.0f;
-  assert(dual_hp_on(reached));
+// Regression: the second HP was added while the owner was still ramping below the duo floor, overshot the demand and
+// was shed again after the disable hold, restarting ~13 minutes later.
+void test_ramping_owner_below_floor_waits() {
+  assert(!duo_floor_reached(ramping_below_floor()));
+  auto reached = ramping_below_floor();
+  reached.owner_power_w = 3300.0f;
+  assert(duo_floor_reached(reached));
 }
 
-// A lead that cannot step up (frequency cap, excluded range, maximum level) must not block the second HP.
-void test_capped_lead_keeps_duo_available() {
-  auto capped = maintain_ramping();
-  capped.lead_ramping = false;
-  assert(dual_hp_on(capped));
-}
-
-void test_forced_paths_bypass_floor() {
-  auto forced = maintain_ramping();
-  forced.forced = true;
-  forced.duo_better = false;
-  forced.demand_high = false;
-  assert(dual_hp_on(forced));
-  forced.eligible = false;
-  assert(!dual_hp_on(forced));
+// An owner that cannot step up must never block the second HP.
+void test_owner_that_cannot_step_up_keeps_duo_available() {
+  auto held = ramping_below_floor();
+  held.owner_may_step_up = false;  // incident blocks a higher request, or the owner is defrosting
+  assert(duo_floor_reached(held));
+  auto at_request = ramping_below_floor();
+  at_request.owner_request = at_request.owner_level;  // frequency cap, envelope or demand already reached
+  assert(duo_floor_reached(at_request));
+  at_request.owner_request = 1;
+  assert(duo_floor_reached(at_request));
+  auto idle = ramping_below_floor();
+  idle.owner_level = 0;
+  idle.owner_power_w = 0.0f;
+  assert(duo_floor_reached(idle));
 }
 
 void test_unknown_model_keeps_previous_behaviour() {
-  auto in = maintain_ramping();
-  in.lead_power_w = NAN;
-  assert(dual_hp_on(in));
-  in = maintain_ramping();
+  auto in = ramping_below_floor();
+  in.owner_power_w = NAN;
+  assert(duo_floor_reached(in));
+  in = ramping_below_floor();
   in.duo_floor_power_w = NAN;
-  assert(dual_hp_on(in));
+  assert(duo_floor_reached(in));
   in.duo_floor_power_w = 0.0f;
-  assert(dual_hp_on(in));
-}
-
-void test_existing_conditions_unchanged() {
-  auto in = maintain_ramping();
-  in.lead_ramping = false;
-  in.duo_better = false;
-  assert(!dual_hp_on(in));
-  in.duo_better = true;
-  in.single_short = false;
-  assert(!dual_hp_on(in));
-  in.single_short = true;
-  in.demand_high = false;
-  assert(!dual_hp_on(in));
-  in.demand_high = true;
-  in.temperature_error_c = -0.10f;
-  assert(!dual_hp_on(in));
-  in.temperature_error_c = NAN;
-  assert(dual_hp_on(in));
+  assert(duo_floor_reached(in));
 }
 }  // namespace
 int main() {
-  test_ramping_lead_below_floor_waits();
-  test_capped_lead_keeps_duo_available();
-  test_forced_paths_bypass_floor();
+  test_ramping_owner_below_floor_waits();
+  test_owner_that_cannot_step_up_keeps_duo_available();
   test_unknown_model_keeps_previous_behaviour();
-  test_existing_conditions_unchanged();
   return 0;
 }
